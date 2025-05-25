@@ -1,0 +1,91 @@
+name: Build Unsigned Archive
+
+on:
+  workflow_call:
+
+jobs:
+  archive:
+    runs-on: macos-latest
+    env:
+      MINT_PATH: ${{ github.workspace }}/.mint
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '15.0'
+
+      - name: Install Mint
+        run: brew install mint
+
+      - name: Cache Mint packages
+        uses: actions/cache@v4
+        id: cache-mint-packages
+        with:
+          path: ${{ env.MINT_PATH }}
+          key: ${{ runner.os }}-mint-${{ hashFiles('**/Mintfile') }}
+          restore-keys: |
+            ${{ runner.os }}-mint-
+
+      - name: Generate Xcode Project
+        run: mint run xcodegen generate
+          
+      - name: Cache SPM dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ./ci-outputs/production/archives/DerivedData/Build/SourcePackages/checkouts 
+            ~/.swiftpm/xcode-package-cache
+          key: ${{ runner.os }}-spm-${{ hashFiles('**/Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-
+
+      - name: Build Release Version (Unsigned)
+        run: |
+          set -euo pipefail
+
+          # Create build directories (including subdirectory for archive)
+          # DerivedData will also be included here
+          mkdir -p ./ci-outputs/production/archives/DerivedData
+
+          # Build unsigned archive
+          echo "Building unsigned archive for ScaryCatScreeningKit..."
+          set -o pipefail && xcodebuild \
+            -project "ScaryCatScreeningKit.xcodeproj" \
+            -scheme "ScaryCatScreeningKit" \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -archivePath "./ci-outputs/production/archives/ScaryCatScreeningKit.xcarchive" \
+            -derivedDataPath "./ci-outputs/production/archives/DerivedData" \
+            -skipMacroValidation \
+            CODE_SIGNING_ALLOWED=NO \
+            archive \
+          | xcbeautify
+
+      - name: Verify Archive Contents
+        run: |
+          set -euo pipefail
+          echo "Checking archive contents..."
+          # Check if the specific .framework directory exists within the archive's Products/Library/Frameworks path
+          ARCHIVE_PATH="./ci-outputs/production/archives/ScaryCatScreeningKit.xcarchive"
+          ARCHIVE_FRAMEWORK_PATH="$ARCHIVE_PATH/Products/Library/Frameworks/ScaryCatScreeningKit.framework"
+          if [ ! -d "$ARCHIVE_FRAMEWORK_PATH" ]; then
+            echo "Error: 'ScaryCatScreeningKit.framework' not found in expected archive location ($ARCHIVE_FRAMEWORK_PATH)."
+            # Optionally list contents again on error
+            echo "--- Archive Contents (on error) ---"
+            ls -lR "$ARCHIVE_PATH" || echo "Archive directory not found or empty."
+            exit 1
+          fi
+          echo "✅ Archive content verified."
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-archive
+          path: |-
+            ./ci-outputs/production/archives/ScaryCatScreeningKit.xcarchive
+          retention-days: 7

@@ -22,6 +22,7 @@ UserInterfaceState.xcuserstate
 # Build artifacts
 DerivedData/
 Build/d
+ci-outputs/
 
 *.mlmodel # 他の場所のmlmodelも無視する場合は残す
 
