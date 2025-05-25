@@ -5,7 +5,7 @@ on:
     outputs:
       test_result:
         description: "Test Result"
-        value: ${{ jobs.report-status.outputs.test_result }}
+        value: ${{ jobs.validate-result.outputs.test_result }}
 
 jobs:
   unit-test:
@@ -88,7 +88,7 @@ jobs:
         path: ci-outputs/test-results/unit
         retention-days: 7
 
-  report-status:
+  validate-result:
     needs: [unit-test]
     runs-on: ubuntu-latest
     if: always()
