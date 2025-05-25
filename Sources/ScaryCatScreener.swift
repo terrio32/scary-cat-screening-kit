@@ -34,6 +34,15 @@ public actor ScaryCatScreener {
             throw ScaryCatScreenerError.modelNotFound
         }
 
+        // 環境に応じたログ出力
+        if self.enableLogging {
+            #if targetEnvironment(simulator)
+                print("[ScaryCatScreener] [Info] シミュレータ環境ではCPUのみを使用")
+            #else
+                print("[ScaryCatScreener] [Info] 実機環境では全計算ユニットを使用")
+            #endif
+        }
+
         // モデルのロード
         let loadedModels = try await loadModels(from: modelFileURLs)
         guard !loadedModels.isEmpty else {
@@ -97,14 +106,8 @@ public actor ScaryCatScreener {
         let config = MLModelConfiguration()
         #if targetEnvironment(simulator)
             config.computeUnits = .cpuOnly
-            if enableLogging {
-                print("[ScaryCatScreener] [Debug] シミュレータ環境ではCPUのみを使用")
-            }
         #else
             config.computeUnits = .all
-            if enableLogging {
-                print("[ScaryCatScreener] [Debug] 実機環境では全計算ユニットを使用")
-            }
         #endif
 
         // モデルのロードと設定
@@ -115,8 +118,6 @@ public actor ScaryCatScreener {
         let request = VNCoreMLRequest(model: visionModel)
         #if targetEnvironment(simulator)
             request.usesCPUOnly = true
-        #else
-            request.usesCPUOnly = false
         #endif
         request.imageCropAndScaleOption = .scaleFit
 
@@ -129,54 +130,23 @@ public actor ScaryCatScreener {
 
     // MARK: - Public Screening API
 
-    public func screen(
-        cgImages: [CGImage],
-        probabilityThreshold: Float = 0.85,
-        enableLogging: Bool = false
-    ) async throws -> SCScreeningResults {
-        // 各画像のスクリーニングを並列で実行
-        let results = try await withThrowingTaskGroup(of: IndividualScreeningResult.self) { group in
-            for (index, image) in cgImages.enumerated() {
-                group.addTask {
-                    let scaryFeatures = try await self.screenSingleImage(
-                        image,
-                        at: index,
-                        probabilityThreshold: probabilityThreshold,
-                        enableLogging: enableLogging
-                    )
-                    return IndividualScreeningResult(
-                        index: index,
-                        cgImage: image,
-                        scaryFeatures: scaryFeatures
-                    )
-                }
-            }
-
-            var collectedResults: [IndividualScreeningResult] = []
-            for try await result in group {
-                collectedResults.append(result)
-            }
-            return collectedResults.sorted { $0.index < $1.index }
-        }
-
-        return SCScreeningResults(results: results)
-    }
-
     private func screenSingleImage(
         _ image: CGImage,
-        at _: Int,
-        probabilityThreshold: Float,
+        probabilityThreshold _: Float,
         enableLogging: Bool
-    ) async throws -> [DetectedScaryFeature] {
-        var scaryFeatures: [DetectedScaryFeature] = []
+    ) async throws -> [String: Float] {
+        var confidences: [String: Float] = [:]
 
-        try await withThrowingTaskGroup(of: (modelId: String, observations: [DetectedScaryFeature]?).self) { group in
+        try await withThrowingTaskGroup(of: (modelId: String, observations: [DetectedFeature]?).self) { group in
             for container in self.ovrModels {
                 group.addTask {
                     do {
                         let handler = VNImageRequestHandler(cgImage: image, options: [:])
                         try handler.perform([container.request])
                         guard let observations = container.request.results as? [VNClassificationObservation] else {
+                            if enableLogging {
+                                print("[ScaryCatScreener] [Warning] モデル\(container.modelFileName)の結果が不正な形式")
+                            }
                             return (container.modelFileName, nil)
                         }
                         let mappedObservations = observations.map { (
@@ -198,15 +168,41 @@ public actor ScaryCatScreener {
             for try await result in group {
                 guard let mappedObservations = result.observations else { continue }
 
-                // 各モデルの検出結果から危険な特徴を収集
-                for observation in mappedObservations
-                    where observation.confidence >= probabilityThreshold && observation.featureName != "Rest"
-                {
-                    scaryFeatures.append((featureName: observation.featureName, confidence: observation.confidence))
+                // すべての検出結果を収集
+                for observation in mappedObservations where observation.featureName != "Rest" {
+                    confidences[observation.featureName] = observation.confidence
                 }
             }
         }
 
-        return scaryFeatures
+        return confidences
+    }
+
+    public func screen(
+        cgImages: [CGImage],
+        probabilityThreshold: Float = 0.85,
+        enableLogging: Bool = false
+    ) async throws -> [SCSIndividualScreeningResult] {
+        // 各画像のスクリーニングを直列で実行
+        var results: [SCSIndividualScreeningResult] = []
+        for image in cgImages {
+            let confidences = try await screenSingleImage(
+                image,
+                probabilityThreshold: probabilityThreshold,
+                enableLogging: enableLogging
+            )
+            results.append(SCSIndividualScreeningResult(
+                cgImage: image,
+                confidences: confidences,
+                probabilityThreshold: probabilityThreshold
+            ))
+        }
+
+        if enableLogging {
+            let overallResults = SCSOverallScreeningResults(results: results)
+            print(overallResults.generateDetailedReport())
+        }
+
+        return results
     }
 }

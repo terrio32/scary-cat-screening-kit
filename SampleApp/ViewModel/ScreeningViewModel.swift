@@ -10,17 +10,14 @@ struct CatImageResponse: Decodable, Identifiable {
     let height: Int?
 }
 
-struct UnsafeImageResult {
-    let image: UIImage
-    let url: URL
-    let features: [DetectedScaryFeature]
-}
-
 @MainActor
 class ScreeningViewModel: ObservableObject {
-    @Published private(set) var fetchedImages: [(image: UIImage, url: URL)] = []
-    @Published private(set) var safeImagesForDisplay: [(image: UIImage, url: URL)] = []
-    @Published private(set) var unsafeImagesForDisplay: [UnsafeImageResult] = []
+    private let enableLogging = true
+    public let probabilityThreshold: Float = 0.85
+
+    @Published private(set) var fetchedImages: [(url: URL, image: UIImage)] = []
+    @Published private(set) var safeResults: [SCSIndividualScreeningResult] = []
+    @Published private(set) var unsafeResults: [SCSIndividualScreeningResult] = []
     @Published private(set) var isLoading = false
     @Published private(set) var isScreenerReady = false
     @Published private(set) var errorMessage: String?
@@ -44,7 +41,7 @@ class ScreeningViewModel: ObservableObject {
 
         Task {
             do {
-                self.screener = try await ScaryCatScreener(enableLogging: true)
+                self.screener = try await ScaryCatScreener(enableLogging: enableLogging)
                 self.isScreenerReady = true
             } catch {
                 self.errorMessage = "スクリーナーの初期化に失敗しました: \(error.localizedDescription)"
@@ -57,8 +54,8 @@ class ScreeningViewModel: ObservableObject {
             isLoading = true
             errorMessage = nil
             fetchedImages = []
-            safeImagesForDisplay = []
-            unsafeImagesForDisplay = []
+            safeResults = []
+            unsafeResults = []
             screeningSummary = ""
 
             do {
@@ -81,10 +78,8 @@ class ScreeningViewModel: ObservableObject {
                     )
                 }
 
-                let probabilityThreshold: Float = 0.85
-                let enableLogging = true
-
                 // 画像を直列でダウンロード
+                var cgImages: [CGImage] = []
                 for response in responses {
                     guard let url = URL(string: response.url) else { continue }
 
@@ -110,29 +105,25 @@ class ScreeningViewModel: ObservableObject {
 
                         guard let cgImage = image.cgImage else { continue }
 
-                        fetchedImages.append((image: image, url: url))
-                        let singleResult = try await screener.screen(
-                            cgImages: [cgImage],
-                            probabilityThreshold: probabilityThreshold,
-                            enableLogging: enableLogging
-                        )
-                        let result = singleResult.results[0]
-                        if result.scaryFeatures.isEmpty {
-                            safeImagesForDisplay.append((image: image, url: url))
-                        } else {
-                            unsafeImagesForDisplay.append(UnsafeImageResult(
-                                image: image,
-                                url: url,
-                                features: result.scaryFeatures
-                            ))
-                        }
+                        fetchedImages.append((url: url, image: image))
+                        cgImages.append(cgImage)
                     } catch {
                         print("画像のダウンロードに失敗: \(error.localizedDescription)")
                         continue
                     }
                 }
 
-                screeningSummary = "安全な画像: \(safeImagesForDisplay.count)枚\n危険な画像: \(unsafeImagesForDisplay.count)枚"
+                // すべての画像をクリーニング
+                let results = try await screener.screen(
+                    cgImages: cgImages,
+                    probabilityThreshold: probabilityThreshold,
+                    enableLogging: enableLogging
+                )
+
+                let screeningResults = SCSOverallScreeningResults(results: results)
+                safeResults = screeningResults.safeResults
+                unsafeResults = screeningResults.unsafeResults
+                screeningSummary = screeningResults.generateDetailedReport()
 
             } catch {
                 self.errorMessage = "エラーが発生しました: \(error.localizedDescription)"

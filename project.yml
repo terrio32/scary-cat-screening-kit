@@ -15,18 +15,27 @@ packages:
     from: 7.10.2
 
 schemes:
+  ScaryCatScreeningKit:
+    build:
+      targets:
+        ScaryCatScreeningKit: all
+    archive:
+      config: Release
+    test:
+      config: Debug
+
   SampleApp:
     build:
       targets:
         SampleApp: all
     run:
       config: Debug
-    profile:
-      config: Release
     analyze:
       config: Debug
     archive:
       config: Release
+    test:
+      config: Debug
 
 targets:
   ScaryCatScreeningKit:
@@ -40,6 +49,24 @@ targets:
       base:
         INFOPLIST_FILE: Sources/Info.plist
         PRODUCT_BUNDLE_IDENTIFIER: com.akitora.ScaryCatScreeningKit
+        SKIP_INSTALL: NO
+        BUILD_LIBRARY_FOR_DISTRIBUTION: YES
+
+  ScaryCatScreeningKitTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - Tests
+    dependencies:
+      - target: ScaryCatScreeningKit
+    settings:
+      base:
+        INFOPLIST_FILE: Tests/Info.plist
+        PRODUCT_BUNDLE_IDENTIFIER: com.akitorahayashi.ScaryCatScreeningKitTests
+        TARGETED_DEVICE_FAMILY: 1
+        SUPPORTED_PLATFORMS: iphonesimulator
+    resources:
+      - Tests/TestResources
 
   SampleApp:
     type: application
