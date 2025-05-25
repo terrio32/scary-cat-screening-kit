@@ -15,6 +15,15 @@ packages:
     from: 7.10.2
 
 schemes:
+  ScaryCatScreeningKit:
+    build:
+      targets:
+        ScaryCatScreeningKit: all
+    archive:
+      config: Release
+    test:
+      config: Debug
+
   SampleApp:
     build:
       targets:
@@ -40,6 +49,8 @@ targets:
       base:
         INFOPLIST_FILE: Sources/Info.plist
         PRODUCT_BUNDLE_IDENTIFIER: com.akitora.ScaryCatScreeningKit
+        SKIP_INSTALL: NO
+        BUILD_LIBRARY_FOR_DISTRIBUTION: YES
 
   ScaryCatScreeningKitTests:
     type: bundle.unit-test
