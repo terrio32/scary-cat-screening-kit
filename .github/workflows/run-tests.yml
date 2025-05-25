@@ -50,6 +50,16 @@ jobs:
         echo "Selected simulator ID: $SIMULATOR_ID"
         echo "simulator_id=$SIMULATOR_ID" >> $GITHUB_OUTPUT
 
+    - name: Boot Simulator
+      run: |
+        xcrun simctl boot ${{ steps.select_simulator.outputs.simulator_id }}
+        xcrun simctl list devices | grep ${{ steps.select_simulator.outputs.simulator_id }}
+
+    - name: Wait for Simulator
+      run: |
+        xcrun simctl list devices | grep ${{ steps.select_simulator.outputs.simulator_id }} | grep "Booted" || (echo "Waiting for simulator to boot..." && sleep 10)
+        xcrun simctl list devices | grep ${{ steps.select_simulator.outputs.simulator_id }} | grep "Booted" || (echo "Simulator failed to boot" && exit 1)
+
     - name: Run Unit Tests
       id: unit_tests
       env:
